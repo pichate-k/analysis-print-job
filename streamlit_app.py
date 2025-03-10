@@ -1,80 +1,68 @@
 import streamlit as st
 import fitz 
-#import PyMuPDF
 from PIL import Image
 import os
+import tempfile
 
 st.title("🎈 ระบบวิเคราะห์เอกสารสำหรับการรับงานพิมพ์")
 
-def analyze_image_type(image_path):
+
+
+def analyze_image_type(image):
     """Analyzes an image and determines its type (grayscale, black & white, blank, or color)."""
-    try:
-        img = Image.open(image_path)
-        img = img.convert("RGB")
-        width, height = img.size
-        pixels = img.getdata()
+    img = image.convert("RGB")
+    pixels = img.getdata()
 
-        # Check for blank image
-        is_blank = all(pixel == (255, 255, 255) for pixel in pixels)
-        if is_blank:
-            return "blank"
+    is_blank = all(pixel == (255, 255, 255) for pixel in pixels)
+    if is_blank:
+        return "Blank"
 
-        # Check for color by examining RGB differences per pixel
-        for r, g, b in pixels:
-            if not (abs(r - g) < 5 and abs(g - b) < 5 and abs(b - r) < 5):
-                return "color"  # Found a pixel that's not grayscale
+    for r, g, b in pixels:
+        if not (abs(r - g) < 5 and abs(g - b) < 5 and abs(b - r) < 5):
+            return "Color"
 
-        # If no color pixel is found, check for black & white
-        is_bw = all(pixel == (0,0,0) or pixel == (255,255,255) for pixel in pixels)
+    is_bw = all(pixel == (0, 0, 0) or pixel == (255, 255, 255) for pixel in pixels)
+    return "Black & White" if is_bw else "Grayscale"
 
-        if is_bw:
-          return "black & white"
-        else:
-          return "grayscale"
-
-
-    except FileNotFoundError:
-        return "File not found"
-    except Exception as e:
-        return f"Error: {e}"
-
-def count_page_types(pdf_path, output_folder="images"):
+def count_page_types(pdf_path):
     """Counts the number of color, grayscale, and blank pages in a PDF."""
-    color_count = 0
-    grayscale_count = 0
-    blank_count = 0
-    try:
-        os.makedirs(output_folder, exist_ok=True)
-        doc = fitz.open(pdf_path)
-        for page_num in range(doc.page_count):
-            page = doc[page_num]
-            pix = page.get_pixmap()
-            image_path = os.path.join(output_folder, f"page_{page_num + 1}.png")
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            img.save(image_path)
+    color_count, grayscale_count, blank_count = 0, 0, 0
+    doc = fitz.open(pdf_path)
+    results = []
+    
+    for page_num in range(doc.page_count):
+        page = doc[page_num]
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        image_type = analyze_image_type(img)
+        results.append((page_num + 1, image_type))
+        
+        if image_type == "Color":
+            color_count += 1
+        elif image_type == "Grayscale" or image_type == "Black & White":
+            grayscale_count += 1
+        elif image_type == "Blank":
+            blank_count += 1
+    
+    return results, color_count, grayscale_count, blank_count
 
-            image_type = analyze_image_type(image_path)
-            print(f"Page {page_num+1}: {image_type}")
+# Streamlit UI
+st.title("PDF Page Color Analyzer")
+uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
-            if image_type == "color":
-                color_count += 1
-            elif image_type == "grayscale" or image_type == "black & white":
-                grayscale_count += 1
-            elif image_type == "blank":
-                blank_count += 1
-
-        print(f"Successfully converted {doc.page_count} pages to images in '{output_folder}'")
-        print(f"Color pages: {color_count}")
-        print(f"Grayscale/Black & White pages: {grayscale_count}")
-        print(f"Blank pages: {blank_count}")
-
-    except FileNotFoundError:
-        print(f"Error: PDF file not found at '{pdf_path}'")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-# File uploader
-uploaded_file = st.file_uploader("Upload your work as pdf")
-pdf_file_path = "/content/Lean Canvas.pdf"  # Replace with the actual path to your PDF file
-count_page_types(pdf_file_path)
-
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+        temp_pdf.write(uploaded_file.getvalue())
+        pdf_path = temp_pdf.name
+    
+    results, color_count, grayscale_count, blank_count = count_page_types(pdf_path)
+    
+    st.subheader("Analysis Results")
+    st.write(f"Total Pages: {len(results)}")
+    st.write(f"Color Pages: {color_count}")
+    st.write(f"Grayscale/Black & White Pages: {grayscale_count}")
+    st.write(f"Blank Pages: {blank_count}")
+    
+    st.subheader("Page-wise Analysis")
+    for page_num, image_type in results:
+        st.write(f"Page {page_num}: {image_type}")
